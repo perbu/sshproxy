@@ -153,6 +153,7 @@ func (rs *server) handleServerConn(chans <-chan ssh.NewChannel) error {
 			log.Error("creating dst session:", err)
 		}
 		// Service the channel here:
+
 		go func(in <-chan *ssh.Request) {
 			// Teardown
 			defer func(ch ssh.Channel) {
@@ -163,6 +164,7 @@ func (rs *server) handleServerConn(chans <-chan ssh.NewChannel) error {
 			}(ch)
 
 			// For each request, handle it.
+		requestLoop:
 			for req := range in {
 				log.Info("handling incoming req type: ", req.Type)
 
@@ -171,12 +173,17 @@ func (rs *server) handleServerConn(chans <-chan ssh.NewChannel) error {
 					log.Errorf("dst.SendRequest err: %s", err)
 					continue
 				}
-				log.Trace("dest sendreq reply: %t", reply)
+				log.Tracef("dest sendreq reply status: %t", reply)
+				if req.Type == "exit-status" {
+					break requestLoop
+				}
 
 			}
 		}(reqs) // End of servicing the channel
 
 		// wrappedChannel := cwrapper.NewTypeWriterReadCloser(newChan)
+
+		// copy data between the client and the target:
 		go func() {
 			_, err := io.Copy(ch, dstChan)
 			if err != nil {
@@ -196,25 +203,3 @@ func (rs *server) handleServerConn(chans <-chan ssh.NewChannel) error {
 	defer dst.Close()
 	return nil
 }
-
-/*
-    // Proxy request handling code:
-	if req.WantReply {
-		reply, err := dst.SendRequest(req.Type, req.WantReply, req.Payload)
-		if err != nil {
-			log.Errorf("server(): dst.SendRequest err: %s", err)
-		} else {
-			log.Tracef("SendRequest returned %t", reply)
-		}
-		err = req.Reply(reply, []byte{0, 0, 0, 0})
-		if err != nil {
-			log.Errorf("Responding to WantReply: %s", err)
-			return
-		}
-		log.Trace("Sent nil reply")
-	}
-	if req.Type == "exit-status" {
-		break requestLoop
-	}
-
-*/
