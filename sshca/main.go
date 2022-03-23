@@ -2,44 +2,43 @@ package sshca
 
 import (
 	"fmt"
-	"github.com/gliderlabs/ssh"
 	log "github.com/sirupsen/logrus"
-	gossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh"
 	"io/ioutil"
 	"time"
 )
 
 // GetPrivateKey reads a private key.
 // It will cause a panic if we can't read or parse the key.
-func GetPrivateKey(filename string) gossh.Signer {
+func GetPrivateKey(filename string) ssh.Signer {
 	pemBytes, err := ioutil.ReadFile(filename)
 	checkFatal(err, fmt.Sprintf("Could not read private key from %s: %s", filename, err))
 	if len(pemBytes) == 0 {
 		panic("Router server private key not set")
 	}
-	privKey, err := gossh.ParseRawPrivateKey(pemBytes)
+	privKey, err := ssh.ParseRawPrivateKey(pemBytes)
 	checkFatal(err, fmt.Sprintf("Could not parse key from %s: %s", filename, err))
-	signer, err := gossh.NewSignerFromKey(privKey)
+	signer, err := ssh.NewSignerFromKey(privKey)
 	checkFatal(err, "Could not create signer from key")
 	return signer
 }
 
-func GetCa(filename string) gossh.PublicKey {
+func GetCa(filename string) ssh.PublicKey {
 	caBytes, err := ioutil.ReadFile(filename)
 	checkFatal(err, fmt.Sprintf("Could not read SSH CA from %s: %s", filename, err))
-	ca, comment, _, _, err := gossh.ParseAuthorizedKey(caBytes)
+	ca, comment, _, _, err := ssh.ParseAuthorizedKey(caBytes)
 	checkFatal(err, fmt.Sprintf("Could not instantiate CA read from %s: %s", filename, err))
 	log.Infof("SSH CA loaded [%s]", comment)
 	return ca
 }
 
-func GetPrivateCert(baseFilename string) gossh.Signer {
+func GetPrivateCert(baseFilename string) ssh.Signer {
 	signer := GetPrivateKey(baseFilename) // Will cause fatal errors on failure.
 	filename := fmt.Sprintf("%s-cert.pub", baseFilename)
 	cert, err := unmarshalCert(filename)
 
 	checkFatal(err, fmt.Sprintf("could not load cert (%s): %s", filename, err))
-	certSigner, err := gossh.NewCertSigner(cert, signer)
+	certSigner, err := ssh.NewCertSigner(cert, signer)
 	checkFatal(err, "could not create a signer")
 	// Todo: Log some more data on the loaded cert here.
 	log.Infof("Loaded cert with ID '%s': Valid [%v --> %v]", cert.KeyId,
@@ -47,7 +46,7 @@ func GetPrivateCert(baseFilename string) gossh.Signer {
 	return certSigner
 }
 
-func unmarshalCert(path string) (*gossh.Certificate, error) {
+func unmarshalCert(path string) (*ssh.Certificate, error) {
 	certBytes, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -56,7 +55,7 @@ func unmarshalCert(path string) (*gossh.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	cert, ok := pub.(*gossh.Certificate)
+	cert, ok := pub.(*ssh.Certificate)
 	if !ok {
 		return nil, fmt.Errorf("failed to cast to certificate")
 	}

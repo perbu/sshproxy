@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"github.com/perbu/sshproxy/sshca"
 	log "github.com/sirupsen/logrus"
 	ssh "golang.org/x/crypto/ssh"
+	"io"
 	"net"
 	"sync"
 )
@@ -106,7 +108,24 @@ func (rs *server) listen(ctx context.Context, sshServer *ssh.ServerConfig) error
 	return nil
 }
 
-func (rs *server) handleServerConn(chans <-chan ssh.NewChannel) {
+func (rs *server) dial() (*ssh.Client, error) {
+
+	conf := &ssh.ClientConfig{
+		User:            "celerway",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(rs.privKey),
+		},
+	}
+	return ssh.Dial("tcp", "localhost:3222", conf)
+}
+
+func (rs *server) handleServerConn(chans <-chan ssh.NewChannel) error {
+	// Todo: defer some teardown here.
+	dst, err := rs.dial()
+	if err != nil {
+		log.Error("ssh dial: %s", err)
+	}
 
 	for newChan := range chans {
 		log.Debug("Incoming chan of type: ", newChan.ChannelType())
@@ -117,26 +136,65 @@ func (rs *server) handleServerConn(chans <-chan ssh.NewChannel) {
 			}
 			continue
 		}
-
+		// Open the channel to destination:
+		dstChan, dstReqs, err := dst.OpenChannel(newChan.ChannelType(), newChan.ExtraData())
+		if err != nil {
+			log.Error("opening channel to dst: ", err)
+			return fmt.Errorf("open dst channel: %w", err)
+		}
+		go ssh.DiscardRequests(dstReqs) // Not sure about this.
 		ch, reqs, err := newChan.Accept()
 		if err != nil {
 			// handle error
 			log.Error("accepting incoming channel error: ", err)
 			continue
 		}
-
+		if err != nil {
+			log.Error("creating dst session:", err)
+		}
+		// Service the channel here:
 		go func(in <-chan *ssh.Request) {
+			// Teardown
 			defer func(ch ssh.Channel) {
 				err := ch.Close()
 				if err != nil {
 					log.Error("closing request channel: ", err)
 				}
 			}(ch)
+
+			// For each request, handle it.
 			for req := range in {
 				log.Info("handling incoming req type: ", req.Type)
+
+				reply, err := dstChan.SendRequest(req.Type, req.WantReply, req.Payload)
+				if err != nil {
+					log.Errorf("dst.SendRequest err: %s", err)
+					continue
+				}
+				log.Trace("dest sendreq reply: %t", reply)
+
 			}
-		}(reqs)
-	}
+		}(reqs) // End of servicing the channel
+
+		// wrappedChannel := cwrapper.NewTypeWriterReadCloser(newChan)
+		go func() {
+			_, err := io.Copy(ch, dstChan)
+			if err != nil {
+				log.Error("io copy ch --> dstChan: ", err)
+			}
+		}()
+		go func() {
+			_, err := io.Copy(dstChan, ch)
+			if err != nil {
+				log.Error("io copy dstChan --> ch: ", err)
+			}
+		}()
+		defer ch.Close()
+		defer dstChan.Close()
+
+	} // for newChan ...
+	defer dst.Close()
+	return nil
 }
 
 /*
