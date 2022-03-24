@@ -3,7 +3,7 @@
 
 FROM alpine
 COPY server.sh /
-RUN apk add bash curl openssh-server
+RUN apk add bash curl openssh-server rsync
 RUN adduser -D celerway && passwd -u celerway
 RUN mkdir -p /home/celerway/.ssh/ && cd /home/celerway/ && chown -R celerway .ssh && chmod 0700 .ssh && chown -R celerway /home/celerway
 COPY sshd_config /etc/ssh/

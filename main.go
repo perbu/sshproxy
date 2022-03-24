@@ -19,6 +19,9 @@ func main() {
 
 func realMain() error {
 	log.SetLevel(log.TraceLevel)
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
 	log.Info("sshproxy starting up")
 
 	ctx, cancel := context.WithCancel(context.Background())
