@@ -6,6 +6,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"io"
 	"sync"
+	"time"
 )
 
 func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
@@ -15,6 +16,7 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 		log.Errorf("ssh dial: %s", err)
 		return fmt.Errorf("ssh dial: %w", err)
 	}
+	defer dst.Close()
 
 	for newChan := range srcChans {
 		log.Debug("Incoming chan of type: ", newChan.ChannelType())
@@ -40,20 +42,30 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 			continue
 		}
 
+		handlerWg := sync.WaitGroup{}
+		handlerWg.Add(2)
 		// proxy requests from src --> dst. These are all the stuff the clients wanna do
 		go func() {
+			defer handlerWg.Done()
 			proxyRequests(srcReqs, dstChan, "src --> dst") // End of servicing the channel
+			time.Sleep(10 * time.Millisecond)              // Give any outstanding output time to get accross.
 			err := dstChan.Close()
 			if err != nil {
-				log.Errorf("proxyRequests src --> dst, closing dstChan: %s", err)
+				if err.Error() != "EOF" {
+					log.Errorf("proxyRequests src --> dst, closing dstChan: %s", err)
+				}
 			}
 		}()
 		// proxy stuff back. afaik this is mostly "exit-status" to let the src know how remote invocation went
 		go func() {
+			defer handlerWg.Done()
 			proxyRequests(dstReqs, srcChan, "dst --> src") // End of servicing the channel
+			time.Sleep(10 * time.Millisecond)              // Give any outstanding output time to get accross.
 			err := srcChan.Close()
 			if err != nil {
-				log.Errorf("proxyRequests dst --> src, closing srcChan %s", err)
+				if err.Error() != "EOF" {
+					log.Errorf("proxyRequests dst --> src, closing srcChan %s", err)
+				}
 			}
 		}()
 
@@ -78,15 +90,17 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 		}()
 		go func() {
 			defer wg.Done()
-			_, err := io.Copy(dstChan.Stderr(), srcChan.Stderr())
+			_, err := io.Copy(srcChan.Stderr(), dstChan.Stderr())
 			if err != nil {
-				log.Error("io copy dst/stderr --> src/stderr: ", err)
+				log.Error("io copy src/stderr --> dst/stderr: ", err)
 			}
 		}()
 
 		log.Debug("io.Copy running. Waiting for them to finish.")
 		wg.Wait()
-		log.Debug("io.Copy done.")
+		log.Debug("waiting for proxy to finish")
+		handlerWg.Wait()
+		log.Debug("io.Copy done. Session done.")
 	} // for newChan ...
 
 	return nil
@@ -98,7 +112,7 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 func proxyRequests(srcIn <-chan *ssh.Request, dstChan ssh.Channel, debugDescription string) {
 	log.Debugf("proxyRequests(%s) running", debugDescription)
 	for req := range srcIn {
-		log.Infof("proxy(%s) req type: %s, wantReply: %t, payload: '%x' / '%s'",
+		log.Trace("proxy(%s) req type: %s, wantReply: %t, payload: '%x' / '%s'",
 			debugDescription, req.Type, req.WantReply, req.Payload, clean(req.Payload))
 		reply, err := dstChan.SendRequest(req.Type, req.WantReply, req.Payload)
 		if err != nil {
@@ -107,7 +121,7 @@ func proxyRequests(srcIn <-chan *ssh.Request, dstChan ssh.Channel, debugDescript
 		}
 		log.Tracef("proxyRequests(%s)/reply status: %t", debugDescription, reply)
 		if reply {
-			log.Debug("sending response to req type", req.Type)
+			log.Trace("sending response to req type", req.Type)
 			err := req.Reply(reply, nil)
 			if err != nil {
 				log.Error("proxyRequests/reply error: ", err)

@@ -85,6 +85,7 @@ func (rs *server) listen(ctx context.Context, sshServer *ssh.ServerConfig) error
 
 	for ctx.Err() == nil {
 		// Once a ServerConfig has been configured, connections can be accepted.
+		// Todo: see if we can move this out to a separate function.
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Error("accept: ", err)
