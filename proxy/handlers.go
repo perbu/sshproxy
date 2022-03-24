@@ -5,7 +5,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"io"
-	"strings"
 	"sync"
 )
 
@@ -44,12 +43,18 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 		// proxy requests from src --> dst. These are all the stuff the clients wanna do
 		go func() {
 			proxyRequests(srcReqs, dstChan, "src --> dst") // End of servicing the channel
-			dstChan.Close()
+			err := dstChan.Close()
+			if err != nil {
+				log.Errorf("proxyRequests src --> dst, closing dstChan: %s", err)
+			}
 		}()
 		// proxy stuff back. afaik this is mostly "exit-status" to let the src know how remote invocation went
 		go func() {
 			proxyRequests(dstReqs, srcChan, "dst --> src") // End of servicing the channel
-			srcChan.Close()
+			err := srcChan.Close()
+			if err != nil {
+				log.Errorf("proxyRequests dst --> src, closing srcChan %s", err)
+			}
 		}()
 
 		// todo: consider wrapping channels if things get fishy
@@ -82,23 +87,7 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 		log.Debug("io.Copy running. Waiting for them to finish.")
 		wg.Wait()
 		log.Debug("io.Copy done.")
-		err = srcChan.Close()
-		if err != nil {
-			log.Error("closing src chan:", err)
-		}
-		err = dstChan.Close()
-		if err != nil {
-			log.Error("closing dst chan:", err)
-		}
 	} // for newChan ...
-
-	/*
-		err = dst.Wait()
-		if err != nil {
-			log.Error("waiting for session: ", err)
-		}
-	*/
-	defer dst.Close()
 
 	return nil
 }
@@ -107,18 +96,10 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 // note that src and dst are relative here and their meaning is dependent on the invocation
 // set debugDescription to indicate what direction it is operating in.
 func proxyRequests(srcIn <-chan *ssh.Request, dstChan ssh.Channel, debugDescription string) {
-	// For each request, handle it.
-	defer func() {
-		log.Debugf("== proxy(%s) ending ==", debugDescription)
-		err := dstChan.Close() // close the opposite end when we exit.
-		if err != nil {
-			log.Errorf("defer proxy(%s) closing dstChan: %s", debugDescription, err)
-		}
-	}()
 	log.Debugf("proxyRequests(%s) running", debugDescription)
 	for req := range srcIn {
 		log.Infof("proxy(%s) req type: %s, wantReply: %t, payload: '%x' / '%s'",
-			debugDescription, strings.ToUpper(req.Type), req.WantReply, req.Payload, clean(req.Payload))
+			debugDescription, req.Type, req.WantReply, req.Payload, clean(req.Payload))
 		reply, err := dstChan.SendRequest(req.Type, req.WantReply, req.Payload)
 		if err != nil {
 			log.Errorf("proxyRequests/SendRequest err: %s", err)
@@ -126,23 +107,13 @@ func proxyRequests(srcIn <-chan *ssh.Request, dstChan ssh.Channel, debugDescript
 		}
 		log.Tracef("proxyRequests(%s)/reply status: %t", debugDescription, reply)
 		if reply {
-			log.Debug("sending response to ", req.Type)
+			log.Debug("sending response to req type", req.Type)
 			err := req.Reply(reply, nil)
 			if err != nil {
 				log.Error("proxyRequests/reply error: ", err)
 				continue
 			}
 		}
-		if req.Type == "exit-status" {
-			// log.Warnf("proxy(%s) ======== EXIT STATUS ===========", debugDescription)
-			continue
-		}
-		if req.Type == "exec" {
-			// log.Warnf("proxy(%s) ======== EXEC ===========", debugDescription)
-			log.Debug("exec done. now what?")
-			// dstChan.Write([]byte("well done"))
-		}
-
 	} // end for range srcIn
 }
 
