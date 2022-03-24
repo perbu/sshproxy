@@ -14,7 +14,6 @@ type ServerConfig struct {
 	ServerPrivKey string
 }
 type server struct {
-	checker ssh.CertChecker
 	addr    string
 	privKey ssh.Signer
 }
