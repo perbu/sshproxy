@@ -12,10 +12,8 @@ import (
 type ServerConfig struct {
 	ListenAddr    string
 	ServerPrivKey string
-	SshCa         string
 }
 type server struct {
-	ca      ssh.PublicKey
 	checker ssh.CertChecker
 	addr    string
 	privKey ssh.Signer
@@ -25,7 +23,6 @@ func MkConfig() ServerConfig {
 	config := ServerConfig{
 		ListenAddr:    "localhost:4222",
 		ServerPrivKey: "id_rsa",
-		SshCa:         "CA",
 	}
 	return config
 }
@@ -33,7 +30,6 @@ func MkConfig() ServerConfig {
 func Run(ctx context.Context, c ServerConfig) error {
 	var err error
 	rs := server{
-		ca:      sshca.GetCa(c.SshCa),
 		addr:    c.ListenAddr,
 		privKey: sshca.GetPrivateKey(c.ServerPrivKey),
 	}
