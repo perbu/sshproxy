@@ -4,6 +4,10 @@ This is a PoC ssh proxy written in Go. It is meant as a toy
 proxy to play around with and help me figure out how exactly 
 the ssh protocol works.
 
+It is meant to be as simple as possible and the only significant dependency 
+is the x/crypto/ssh package. I've seen some other implementations, but these 
+have been rather complex with a heavy reliance on complex closures. 
+
 Except for the obvious lack of security (it accepts any public key)
 the code should be reasonably ready to be plopped into production.
 
@@ -35,4 +39,10 @@ See the Makefile. It should contain targets for all operations you'll need.
 ## What is missing?
 
 At the moment I've not tried sftp. I don't need it, I expect it would work but it does perhaps 
-need changed to sshd_config to allow the sftp subsystem to be enabled. 
+need changed to sshd_config to allow the sftp subsystem to be enabled.
+
+## Hacks and uglyness.
+
+When the channel of requests is closed the proxyRequest function will sleep for 10ms. This is to make
+sure that stdout and stderr gets copied to the client. Suggestions for how to do this 
+cleanly are welcome.
