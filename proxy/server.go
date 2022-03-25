@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"github.com/perbu/sshproxy/sshca"
 	log "github.com/sirupsen/logrus"
 	ssh "golang.org/x/crypto/ssh"
 	"net"
@@ -10,18 +9,18 @@ import (
 )
 
 type ServerConfig struct {
-	ListenAddr    string
-	ServerPrivKey string
+	listenAddr string
+	privKey    ssh.Signer
 }
 type server struct {
 	addr    string
 	privKey ssh.Signer
 }
 
-func MkConfig() ServerConfig {
+func MkConfig(addr string, signer ssh.Signer) ServerConfig {
 	config := ServerConfig{
-		ListenAddr:    "localhost:4222",
-		ServerPrivKey: "id_rsa",
+		listenAddr: addr,
+		privKey:    signer,
 	}
 	return config
 }
@@ -29,8 +28,8 @@ func MkConfig() ServerConfig {
 func Run(ctx context.Context, c ServerConfig) error {
 	var err error
 	rs := server{
-		addr:    c.ListenAddr,
-		privKey: sshca.GetPrivateKey(c.ServerPrivKey),
+		addr:    c.listenAddr,
+		privKey: c.privKey,
 	}
 
 	sshCtx, sshCancel := context.WithCancel(context.Background())
@@ -44,7 +43,7 @@ func Run(ctx context.Context, c ServerConfig) error {
 		sshCancel()
 		wg.Done()
 	}()
-	log.Infof("Starting sshproxy on '%s'", c.ListenAddr)
+	log.Infof("Starting sshproxy on '%s'", c.listenAddr)
 	sshServer := rs.configure()
 	err = rs.listen(sshCtx, sshServer)
 	return err
@@ -90,6 +89,9 @@ func (rs *server) listen(ctx context.Context, sshServer *ssh.ServerConfig) error
 			continue
 		}
 		err = rs.handleConn(conn, sshServer)
+		if err != nil {
+			log.Error("handleConn: %s", err)
+		}
 	}
 	return nil
 }

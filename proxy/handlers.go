@@ -11,7 +11,6 @@ import (
 )
 
 func (rs *server) handleChannels(srcChans <-chan ssh.NewChannel) error {
-	// Todo: defer some teardown here.
 	dst, err := rs.dial()
 	if err != nil {
 		log.Errorf("ssh dial: %s", err)
@@ -34,12 +33,6 @@ func (rs *server) handleChannels(srcChans <-chan ssh.NewChannel) error {
 			log.Warnf("rejected channel of unknown type: %s", newChan.ChannelType())
 			continue
 		}
-		// Open the channel to destination:
-		dstChan, dstReqs, err := dst.OpenChannel(newChan.ChannelType(), newChan.ExtraData())
-		if err != nil {
-			log.Error("opening channel to dst: ", err)
-			return fmt.Errorf("open dst channel: %w", err)
-		}
 		srcChan, srcReqs, err := newChan.Accept()
 		if err != nil {
 			// handle error
@@ -49,6 +42,13 @@ func (rs *server) handleChannels(srcChans <-chan ssh.NewChannel) error {
 				log.Error("error closing failed channel: ", err)
 			}
 			continue
+		}
+
+		// Open the channel to destination:
+		dstChan, dstReqs, err := dst.OpenChannel(newChan.ChannelType(), newChan.ExtraData())
+		if err != nil {
+			log.Error("opening channel to dst: ", err)
+			return fmt.Errorf("open dst channel: %w", err)
 		}
 
 		handlerWg := sync.WaitGroup{}
@@ -79,31 +79,31 @@ func (rs *server) handleChannels(srcChans <-chan ssh.NewChannel) error {
 		}()
 
 		// copy data between the client and the target session, both ways.
-		wg := sync.WaitGroup{}
-		wg.Add(3)
+		copyWg := sync.WaitGroup{}
+		copyWg.Add(3)
 		go func() {
-			defer wg.Done()
+			defer copyWg.Done()
 			_, err := io.Copy(srcChan, dstChan)
 			if err != nil {
-				log.Error("io copy srcChan --> dstChan: ", err)
+				log.Error("io copy dstChan --> srcChan: ", err)
 			}
 		}()
 		go func() {
-			defer wg.Done()
+			defer copyWg.Done()
 			_, err := io.Copy(dstChan, srcChan)
 			if err != nil {
 				log.Error("io copy dstChan --> srcChan: ", err)
 			}
 		}()
 		go func() {
-			defer wg.Done()
+			defer copyWg.Done()
 			_, err := io.Copy(srcChan.Stderr(), dstChan.Stderr())
 			if err != nil {
 				log.Error("io copy src/stderr --> dst/stderr: ", err)
 			}
 		}()
 
-		wg.Wait()
+		copyWg.Wait()
 		handlerWg.Wait()
 		log.Debug("io.Copy and request proxy done. Session ending.")
 	} // for newChan ...
@@ -117,6 +117,10 @@ func (rs *server) handleChannels(srcChans <-chan ssh.NewChannel) error {
 func proxyRequests(srcIn <-chan *ssh.Request, dstChan ssh.Channel, debugDescription string) {
 	log.Tracef("proxyRequests(%s) running", debugDescription)
 	for req := range srcIn {
+		if req == nil {
+			log.Warn("proxyRequests got a nil request. aborting.")
+			return
+		}
 		log.Tracef("proxy(%s) req type: %s, wantReply: %t, payload: '%x' / '%s'",
 			debugDescription, req.Type, req.WantReply, req.Payload, clean(req.Payload))
 		reply, err := dstChan.SendRequest(req.Type, req.WantReply, req.Payload)
@@ -136,7 +140,7 @@ func proxyRequests(srcIn <-chan *ssh.Request, dstChan ssh.Channel, debugDescript
 	} // end for range srcIn
 }
 
-// handleConn handles a single ssh connection.
+// handleConn handles a single ssh connection. Invoked after the auth has succeeded.
 func (rs *server) handleConn(conn net.Conn, sshServer *ssh.ServerConfig) error {
 	// Before use, a handshake must be performed on the incoming net.Conn.
 	sConn, channels, reqs, err := ssh.NewServerConn(conn, sshServer)

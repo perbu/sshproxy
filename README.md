@@ -5,7 +5,7 @@ proxy to play around with and help me figure out how exactly
 the ssh protocol works.
 
 Except for the obvious lack of security (it accepts any public key)
-the code should be resonably ready to be plopped into production.
+the code should be reasonably ready to be plopped into production.
 
 ## How it works
 
@@ -28,6 +28,6 @@ Other proxies and ssh implementations to look at:
  * https://github.com/tsurubee/sshr
  * https://github.com/gliderlabs/ssh 
 
+# How to build
 
-
-
+See the Makefile. It should contain targets for all operations you'll need. 
