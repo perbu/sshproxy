@@ -4,108 +4,16 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
-	"io"
 	"net"
-	"sync"
-	"time"
 )
 
 func (rs *server) handleChannels(srcChans <-chan ssh.NewChannel) error {
-	dst, err := rs.dial()
-	if err != nil {
-		log.Errorf("ssh dial: %s", err)
-		return fmt.Errorf("ssh dial: %w", err)
-	}
-	defer func(dst *ssh.Client) {
-		err := dst.Close()
-		if err != nil {
-			log.Errorf("handleChannels client teardown: %s", err)
-		}
-	}(dst)
-	log.Debug("connection to destination established, talking to ", string(dst.ServerVersion()))
 
 	for newChan := range srcChans {
-		if newChan.ChannelType() != "session" {
-			err := newChan.Reject(ssh.UnknownChannelType, "unknown channel type")
-			if err != nil {
-				log.Errorf("rejecting channel (type: %s) resultet in error: %s", newChan.ChannelType(), err)
-			}
-			log.Warnf("rejected channel of unknown type: %s", newChan.ChannelType())
-			continue
-		}
-		srcChan, srcReqs, err := newChan.Accept()
+		err := rs.handleChannel(newChan)
 		if err != nil {
-			// handle error
-			log.Error("accepting incoming channel error: ", err)
-			err := srcChan.Close()
-			if err != nil {
-				log.Error("error closing failed channel: ", err)
-			}
-			continue
+			log.Errorf("handleChannel: %s", err)
 		}
-
-		// Open the channel to destination:
-		dstChan, dstReqs, err := dst.OpenChannel(newChan.ChannelType(), newChan.ExtraData())
-		if err != nil {
-			log.Error("opening channel to dst: ", err)
-			return fmt.Errorf("open dst channel: %w", err)
-		}
-
-		handlerWg := sync.WaitGroup{}
-		handlerWg.Add(2)
-		// proxy requests from src --> dst. These are all the stuff the clients wanna do
-		go func() {
-			defer handlerWg.Done()
-			proxyRequests(srcReqs, dstChan, "src --> dst") // End of servicing the channel
-			time.Sleep(10 * time.Millisecond)              // Give any outstanding output time to get accross.
-			err := dstChan.Close()
-			if err != nil {
-				if err.Error() != "EOF" {
-					log.Errorf("proxyRequests src --> dst, closing dstChan: %s", err)
-				}
-			}
-		}()
-		// proxy stuff back. afaik this is mostly "exit-status" to let the src know how remote invocation went
-		go func() {
-			defer handlerWg.Done()
-			proxyRequests(dstReqs, srcChan, "dst --> src") // End of servicing the channel
-			time.Sleep(10 * time.Millisecond)              // Give any outstanding output time to get accross.
-			err := srcChan.Close()
-			if err != nil {
-				if err.Error() != "EOF" {
-					log.Errorf("proxyRequests dst --> src, closing srcChan %s", err)
-				}
-			}
-		}()
-
-		// copy data between the client and the target session, both ways.
-		copyWg := sync.WaitGroup{}
-		copyWg.Add(3)
-		go func() {
-			defer copyWg.Done()
-			_, err := io.Copy(srcChan, dstChan)
-			if err != nil {
-				log.Error("io copy dstChan --> srcChan: ", err)
-			}
-		}()
-		go func() {
-			defer copyWg.Done()
-			_, err := io.Copy(dstChan, srcChan)
-			if err != nil {
-				log.Error("io copy dstChan --> srcChan: ", err)
-			}
-		}()
-		go func() {
-			defer copyWg.Done()
-			_, err := io.Copy(srcChan.Stderr(), dstChan.Stderr())
-			if err != nil {
-				log.Error("io copy src/stderr --> dst/stderr: ", err)
-			}
-		}()
-
-		copyWg.Wait()
-		handlerWg.Wait()
-		log.Debug("io.Copy and request proxy done. Session ending.")
 	} // for newChan ...
 
 	return nil
