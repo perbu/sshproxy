@@ -59,12 +59,15 @@ func (rs *server) configure() *ssh.ServerConfig {
 	return config
 }
 
+// publicKeyHandler
 func (rs *server) publicKeyHandler(_ ssh.ConnMetadata, _ ssh.PublicKey) (*ssh.Permissions, error) {
 	// This is just a PoC so we accept everything here.
 	log.Info("Pubkeyhandler accepting")
 	return nil, nil
 }
 
+// listen is called by Run and does the actual listen on the port. It'll will
+// accept the incoming connections and call handleConn on each of them.
 func (rs *server) listen(ctx context.Context, sshServer *ssh.ServerConfig) error {
 	listener, err := net.Listen("tcp", rs.addr)
 	if err != nil {
@@ -86,23 +89,7 @@ func (rs *server) listen(ctx context.Context, sshServer *ssh.ServerConfig) error
 			log.Error("accept: ", err)
 			continue
 		}
-		// Before use, a handshake must be performed on the incoming net.Conn.
-		sConn, chans, reqs, err := ssh.NewServerConn(conn, sshServer)
-
-		if err != nil {
-			// handle error
-			log.Error("handshake: ", err)
-			continue
-		}
-		user := sConn.Conn.User()
-		log.Debug("Accepted user: ", user)
-		go ssh.DiscardRequests(reqs) // The incoming Request channel must be serviced.
-		go func() {
-			err = rs.handleServerConn(chans)
-			if err != nil {
-				log.Error("handleServerConn: %s", err)
-			}
-		}()
+		err = rs.handleConn(conn, sshServer)
 	}
 	return nil
 }

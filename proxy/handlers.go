@@ -5,11 +5,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 	"io"
+	"net"
 	"sync"
 	"time"
 )
 
-func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
+func (rs *server) handleChannels(srcChans <-chan ssh.NewChannel) error {
 	// Todo: defer some teardown here.
 	dst, err := rs.dial()
 	if err != nil {
@@ -19,7 +20,7 @@ func (rs *server) handleServerConn(srcChans <-chan ssh.NewChannel) error {
 	defer func(dst *ssh.Client) {
 		err := dst.Close()
 		if err != nil {
-			log.Errorf("handleServerConn client teardown: %s", err)
+			log.Errorf("handleChannels client teardown: %s", err)
 		}
 	}(dst)
 	log.Debug("connection to destination established, talking to ", string(dst.ServerVersion()))
@@ -133,6 +134,26 @@ func proxyRequests(srcIn <-chan *ssh.Request, dstChan ssh.Channel, debugDescript
 			}
 		}
 	} // end for range srcIn
+}
+
+// handleConn handles a single ssh connection.
+func (rs *server) handleConn(conn net.Conn, sshServer *ssh.ServerConfig) error {
+	// Before use, a handshake must be performed on the incoming net.Conn.
+	sConn, channels, reqs, err := ssh.NewServerConn(conn, sshServer)
+
+	if err != nil {
+		return fmt.Errorf("handleConn handshake: %w", err)
+	}
+	user := sConn.Conn.User()
+	log.Debug("Accepted connection from user: ", user)
+	go ssh.DiscardRequests(reqs) // The incoming Request channel must be serviced.
+	go func() {
+		err = rs.handleChannels(channels)
+		if err != nil {
+			log.Error("handleChannels: %s", err)
+		}
+	}()
+	return nil
 }
 
 func clean(bytes []byte) string {
