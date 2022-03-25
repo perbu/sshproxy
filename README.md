@@ -28,6 +28,11 @@ Other proxies and ssh implementations to look at:
  * https://github.com/tsurubee/sshr
  * https://github.com/gliderlabs/ssh 
 
-# How to build
+## How to build
 
 See the Makefile. It should contain targets for all operations you'll need. 
+
+## What is missing?
+
+At the moment I've not tried sftp. I don't need it, I expect it would work but it does perhaps 
+need changed to sshd_config to allow the sftp subsystem to be enabled. 
