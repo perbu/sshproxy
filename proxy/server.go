@@ -3,12 +3,13 @@ package proxy
 import (
 	"context"
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ssh"
 )
 
 type ServerConfig struct {
@@ -91,10 +92,12 @@ func (rs *server) listen(ctx context.Context, sshServer *ssh.ServerConfig) error
 			log.Error("accept: ", err)
 			continue
 		}
-		err = rs.handleConn(conn, sshServer)
-		if err != nil {
-			log.Error("handleConn: %s", err)
-		}
+		go func() {
+			err = rs.handleConn(conn, sshServer)
+			if err != nil {
+				log.Error("handleConn: %s", err)
+			}
+		}()
 	}
 	return nil
 }
